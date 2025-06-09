@@ -13,36 +13,100 @@ import { WorkItemToolMethods } from './Tools/WorkItemTools';
 
 // Try to load environment variables from .env file with multiple possible locations
 function loadEnvFile() {
-  // First try the current directory
-  if (fs.existsSync('.env')) {
-    dotenv.config();
+  // Build debug info
+  const debugInfo: string[] = [];
+  debugInfo.push('=== Environment Configuration Loading ===');
+  debugInfo.push('Process details:');
+  debugInfo.push(`  - Current directory (process.cwd()): ${process.cwd()}`);
+  debugInfo.push(`  - Script directory (__dirname): ${__dirname}`);
+  debugInfo.push(`  - Script filename (__filename): ${__filename}`);
+  debugInfo.push(`  - Main module: ${require.main?.filename}`);
+  debugInfo.push(`  - Node executable: ${process.execPath}`);
+  debugInfo.push(`  - Command line args: ${process.argv.join(' ')}`);
+  
+  // FIRST: Try the project root (relative to the script location)
+  // This ensures we load the correct .env file for THIS project
+  const scriptDir = __dirname;
+  const projectRootEnv = path.join(scriptDir, '..', '.env');
+  debugInfo.push(`\nChecking project root (relative to script): ${projectRootEnv}`);
+  debugInfo.push(`  - Resolved path: ${path.resolve(projectRootEnv)}`);
+  debugInfo.push(`  - File exists: ${fs.existsSync(projectRootEnv)}`);
+  if (fs.existsSync(projectRootEnv)) {
+    debugInfo.push('  ✓ Found .env at project root: ' + projectRootEnv);
+    dotenv.config({ path: projectRootEnv });
+    writeEnvDebugLog(debugInfo.join('\n'));
     return;
   }
   
-  // Try the directory of the running script
-  const scriptDir = __dirname;
-  const envPath = path.join(scriptDir, '..', '.env');
-  if (fs.existsSync(envPath)) {
-    dotenv.config({ path: envPath });
-    return;
+  // SECOND: Try the current directory (but warn if found)
+  const cwdEnvPath = path.join(process.cwd(), '.env');
+  debugInfo.push(`\nChecking current directory: ${cwdEnvPath}`);
+  debugInfo.push(`  - File exists: ${fs.existsSync(cwdEnvPath)}`);
+  if (fs.existsSync('.env')) {
+    debugInfo.push('  ⚠️  Found .env in current directory - this might be the wrong project!');
+    debugInfo.push('  ⚠️  Current dir: ' + process.cwd());
+    debugInfo.push('  ⚠️  Expected project: /mnt/c/Users/Jordan.HHHC/Documents/MCP/AzureDevOps-MCP');
+    // Don't load it - continue checking other paths
   }
 
   // If we still haven't loaded env vars, try a few other common locations
   const possiblePaths = [
     // One level above the dist directory
     path.join(process.cwd(), '.env'),
+    // Project root (two levels up from dist/config.js)
+    path.join(scriptDir, '..', '..', '.env'),
     // User's home directory
     path.join(process.env.HOME || '', '.azuredevops.env')
   ];
 
+  debugInfo.push('\nChecking additional paths:');
   for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
+    const resolvedPath = path.resolve(p);
+    const exists = fs.existsSync(p);
+    debugInfo.push(`  - ${p}`);
+    debugInfo.push(`    Resolved: ${resolvedPath}`);
+    debugInfo.push(`    Exists: ${exists}`);
+    
+    if (exists) {
+      debugInfo.push('    ✓ Found .env at: ' + p);
       dotenv.config({ path: p });
+      writeEnvDebugLog(debugInfo.join('\n'));
       return;
     }
   }
 
-  console.warn('No .env file found. Using environment variables if available.');
+  debugInfo.push('\n❌ No .env file found. Using environment variables if available.');
+  debugInfo.push('Please ensure .env file is in one of the checked locations.');
+  writeEnvDebugLog(debugInfo.join('\n'));
+}
+
+// Write debug info to a file that can be read even in MCP mode
+function writeEnvDebugLog(message: string) {
+  try {
+    // Write to the same logs directory as our main logger
+    const baseDir = path.dirname(require.main?.filename || __dirname);
+    const logsDir = path.join(baseDir, 'logs');
+    
+    // Ensure logs directory exists
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+    
+    const debugLogPath = path.join(logsDir, 'env-loading-debug.log');
+    const timestamp = new Date().toISOString();
+    const logEntry = `\n${timestamp}\n${message}\n${'='.repeat(80)}\n`;
+    
+    fs.appendFileSync(debugLogPath, logEntry, 'utf8');
+    
+    // Also output to console if not in MCP mode
+    if (process.env.MCP_MODE !== 'true') {
+      console.log(message);
+    }
+  } catch (error) {
+    // If we can't write the debug log, at least try to show in console
+    console.error('Failed to write env debug log:', error);
+    console.log(message);
+  }
 }
 
 // Load environment variables
@@ -61,7 +125,16 @@ export function getAzureDevOpsConfig(): AzureDevOpsConfig {
   
   // Basic validation
   if (!orgUrl || !project) {
-    throw new Error('Missing required Azure DevOps configuration. Please check .env file or environment variables.');
+    const missingVars = [];
+    if (!orgUrl) missingVars.push('AZURE_DEVOPS_ORG_URL');
+    if (!project) missingVars.push('AZURE_DEVOPS_PROJECT');
+    
+    console.error('Environment variables check:');
+    console.error('AZURE_DEVOPS_ORG_URL:', orgUrl ? 'SET' : 'NOT SET');
+    console.error('AZURE_DEVOPS_PROJECT:', project ? 'SET' : 'NOT SET');
+    console.error('Missing variables:', missingVars.join(', '));
+    
+    throw new Error(`Missing required Azure DevOps configuration: ${missingVars.join(', ')}. Please check .env file or environment variables.`);
   }
 
   // Authentication configuration

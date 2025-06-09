@@ -19,6 +19,7 @@ import {
   CreateLinkParams,
   BulkWorkItemParams
 } from '../Interfaces/WorkItems';
+import { logger } from '../utils/logger';
 
 export class WorkItemService extends AzureDevOpsService {
   constructor(config: AzureDevOpsConfig) {
@@ -41,7 +42,10 @@ export class WorkItemService extends AzureDevOpsService {
       
       return queryResult;
     } catch (error) {
-      console.error('Error listing work items:', error);
+      logger.error('WorkItemService', 'Error listing work items', error as Error, {
+        wiqlQuery,
+        project: this.config.project
+      });
       throw error;
     }
   }

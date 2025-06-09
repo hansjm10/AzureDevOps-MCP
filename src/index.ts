@@ -11,21 +11,36 @@ import { ArtifactManagementTools } from './Tools/ArtifactManagementTools';
 import { AIAssistedDevelopmentTools } from './Tools/AIAssistedDevelopmentTools';
 import { z } from 'zod';
 import { EntraAuthHandler } from './Services/EntraAuthHandler';
+import { logger } from './utils/logger';
 
 async function main() {
   try {
     // Log startup info
-    console.log('Starting MCP server for Azure DevOps...');
+    logger.info('Main', 'Starting MCP server for Azure DevOps...', { logFile: logger.getLogFilePath() });
     
     // Load configuration
     const azureDevOpsConfig = getAzureDevOpsConfig();
-    console.log('Successfully loaded Azure DevOps configuration');
+    logger.info('Main', 'Successfully loaded Azure DevOps configuration', {
+      authType: azureDevOpsConfig.auth?.type,
+      isOnPremises: azureDevOpsConfig.isOnPremises,
+      hasProject: !!azureDevOpsConfig.project
+    });
     if(azureDevOpsConfig.auth?.type === 'entra') {
-      azureDevOpsConfig.entraAuthHandler = await EntraAuthHandler.getInstance();
+      try {
+        logger.info('Main', 'Initializing Entra authentication handler...');
+        azureDevOpsConfig.entraAuthHandler = await EntraAuthHandler.getInstance();
+        logger.info('Main', 'Entra authentication handler initialized successfully');
+      } catch (error) {
+        logger.error('Main', 'Failed to initialize Entra authentication', error as Error);
+        throw error;
+      }
     }
     // Load allowed tools
     const allowedTools = getAllowedTools();
-    console.log('Successfully loaded allowed tools');
+    logger.info('Main', 'Successfully loaded allowed tools', { 
+      toolCount: allowedTools.size,
+      tools: Array.from(allowedTools).slice(0, 10) // Log first 10 tools
+    });
     
     // Initialize tools
     const workItemTools = new WorkItemTools(azureDevOpsConfig);
@@ -37,7 +52,7 @@ async function main() {
     const artifactManagementTools = new ArtifactManagementTools(azureDevOpsConfig);
     const aiAssistedDevelopmentTools = new AIAssistedDevelopmentTools(azureDevOpsConfig);
     
-    console.log('Initialized tools');
+    logger.info('Main', 'Initialized all tool instances');
 
     // Create MCP server
     const server = new McpServer({
@@ -1692,21 +1707,27 @@ async function main() {
       }
     );
 
-    console.log(`Registered tools`);
+    logger.info('Main', 'Registered all tools with MCP server');
     // Create a transport (use stdio for simplicity)
-    console.log('Creating StdioServerTransport');
+    logger.info('Main', 'Creating StdioServerTransport');
     const transport = new StdioServerTransport();
     
     // Connect to the transport and start listening
-    console.log('Connecting to transport...');
+    logger.info('Main', 'Connecting to transport...');
     await server.connect(transport);
-    console.log('Connected to transport');
+    logger.info('Main', 'Connected to transport successfully');
 
   } catch (error) {
-    console.error('Error starting MCP server:', error);
-    if (error instanceof Error) {
-      console.error('Stack trace:', error.stack);
+    logger.error('Main', 'Error starting MCP server', error as Error, {
+      errorType: error?.constructor?.name,
+      errorCode: (error as any)?.code
+    });
+    
+    // If it's a connection error, log additional details
+    if (error instanceof Error && error.message.toLowerCase().includes('connection')) {
+      logger.logConnectionFailure('Main', error, getAzureDevOpsConfig());
     }
+    
     process.exit(1);
   }
 }
@@ -1714,6 +1735,29 @@ async function main() {
 // Set an environment variable to indicate we're in MCP mode
 // This helps prevent console.log from interfering with stdio communication
 process.env.MCP_MODE = 'true';
+
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+  logger.info('Main', 'Received SIGINT, shutting down gracefully...');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  logger.info('Main', 'Received SIGTERM, shutting down gracefully...');
+  process.exit(0);
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Main', 'Uncaught exception', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Main', 'Unhandled rejection', new Error(String(reason)), {
+    promise: String(promise)
+  });
+  process.exit(1);
+});
 
 // Run the server
 main(); 
