@@ -15,7 +15,8 @@ import {
   GetPullRequestParams,
   GetPullRequestCommentsParams,
   ApprovePullRequestParams,
-  MergePullRequestParams
+  MergePullRequestParams,
+  AddPullRequestCommentParams
 } from '../Interfaces/CodeAndRepositories';
 import getClassMethods from "../utils/getClassMethods";
 
@@ -204,6 +205,22 @@ export class GitTools {
       return formatMcpResponse(result, `Merged pull request ${params.pullRequestId}`);
     } catch (error) {
       console.error('Error in mergePullRequest tool:', error);
+      return formatErrorResponse(error);
+    }
+  }
+
+  /**
+   * Add a comment to a pull request
+   */
+  public async addPullRequestComment(params: AddPullRequestCommentParams): Promise<McpResponse> {
+    try {
+      const result = await this.gitService.addPullRequestComment(params);
+      const message = params.threadId 
+        ? `Added comment to thread ${params.threadId} in pull request ${params.pullRequestId}`
+        : `Created new comment thread in pull request ${params.pullRequestId}`;
+      return formatMcpResponse(result, message);
+    } catch (error) {
+      console.error('Error in addPullRequestComment tool:', error);
       return formatErrorResponse(error);
     }
   }

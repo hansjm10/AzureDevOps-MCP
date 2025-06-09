@@ -175,4 +175,28 @@ export interface CompletePullRequestParams {
   deleteSourceBranch?: boolean;
   comment?: string;
   projectId?: string;
+}
+
+/**
+ * Interface for adding a comment to a pull request
+ */
+export interface AddPullRequestCommentParams {
+  repositoryId: string;
+  pullRequestId: number;
+  content: string;
+  parentCommentId?: number;
+  threadId?: number;
+  filePath?: string;
+  lineNumber?: number;
+  threadContext?: {
+    filePath: string;
+    rightFileStart?: {
+      line: number;
+      offset: number;
+    };
+    rightFileEnd?: {
+      line: number;
+      offset: number;
+    };
+  };
 } 

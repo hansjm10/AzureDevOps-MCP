@@ -812,6 +812,26 @@ async function main() {
       }
     );
     
+    allowedTools.has("addPullRequestComment") && server.tool("addPullRequestComment", 
+      "Add a comment to a pull request",
+      {
+        repositoryId: z.string().describe("ID of the repository"),
+        pullRequestId: z.number().describe("ID of the pull request"),
+        content: z.string().describe("Content of the comment"),
+        parentCommentId: z.number().optional().describe("ID of the parent comment for replies"),
+        threadId: z.number().optional().describe("ID of the thread to add comment to"),
+        filePath: z.string().optional().describe("File path for file-specific comments")
+      },
+      async (params, extra) => {
+        const result = await gitTools.addPullRequestComment(params);
+        return {
+          content: result.content,
+          rawData: result.rawData,
+          isError: result.isError
+        };
+      }
+    );
+    
     // Register Testing Capabilities Tools
     allowedTools.has("runAutomatedTests") && server.tool("runAutomatedTests", 
       "Execute automated test suites",

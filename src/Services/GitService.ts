@@ -2,6 +2,7 @@ import * as azdev from 'azure-devops-node-api';
 import { GitApi } from 'azure-devops-node-api/GitApi';
 import { AzureDevOpsConfig } from '../Interfaces/AzureDevOps';
 import { AzureDevOpsService } from './AzureDevOpsService';
+import { validatePullRequestRepository } from '../utils/repositoryValidation';
 import {
   ListRepositoriesParams,
   GetRepositoryParams,
@@ -18,7 +19,8 @@ import {
   MergePullRequestParams,
   GetCommitsParams,
   GetPullRequestsParams,
-  CompletePullRequestParams
+  CompletePullRequestParams,
+  AddPullRequestCommentParams
 } from '../Interfaces/CodeAndRepositories';
 
 export class GitService extends AzureDevOpsService {
@@ -373,10 +375,55 @@ export class GitService extends AzureDevOpsService {
         this.config.project
       );
       
-      return pullRequest;
+      // Override status values with human-readable text for AI interpretation
+      // Status values: 1=active, 2=abandoned, 3=completed
+      const statusNumber = Number(pullRequest.status ?? 0);
+      const statusText = this.getPullRequestStatusText(statusNumber);
+      
+      // Merge status values: 1=conflicts, 2=failure, 3=notSet, 4=queued, 5=rejectedByPolicy, 6=succeeded
+      const mergeStatusNumber = Number(pullRequest.mergeStatus ?? 3);
+      const mergeStatusText = this.getMergeStatusText(mergeStatusNumber);
+      
+      return {
+        ...pullRequest,
+        status: statusText,
+        mergeStatus: mergeStatusText
+      };
     } catch (error) {
       console.error(`Error getting pull request ${params.pullRequestId}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Convert numeric status to human-readable text based on Azure DevOps API documentation
+   * @param status Numeric status from Azure DevOps API
+   * @returns Human-readable status text
+   */
+  private getPullRequestStatusText(status: number): string {
+    switch (status) {
+      case 0: return 'notSet';
+      case 1: return 'active';
+      case 2: return 'abandoned'; 
+      case 3: return 'completed';
+      default: return `unknown(${status})`;
+    }
+  }
+
+  /**
+   * Convert numeric merge status to human-readable text based on Azure DevOps API documentation
+   * @param mergeStatus Numeric merge status from Azure DevOps API
+   * @returns Human-readable merge status text
+   */
+  private getMergeStatusText(mergeStatus: number): string {
+    switch (mergeStatus) {
+      case 1: return 'conflicts';
+      case 2: return 'failure';
+      case 3: return 'notSet';
+      case 4: return 'queued';
+      case 5: return 'rejectedByPolicy';
+      case 6: return 'succeeded';
+      default: return `unknown(${mergeStatus})`;
     }
   }
 
@@ -386,6 +433,14 @@ export class GitService extends AzureDevOpsService {
   public async getPullRequestComments(params: GetPullRequestCommentsParams): Promise<any> {
     try {
       const gitApi = await this.getGitApi();
+      
+      // Validate that the repository ID matches the pull request
+      await validatePullRequestRepository(
+        gitApi,
+        params.repositoryId,
+        params.pullRequestId,
+        this.config.project
+      );
       
       if (params.threadId) {
         const thread = await gitApi.getPullRequestThread(
@@ -418,6 +473,14 @@ export class GitService extends AzureDevOpsService {
     try {
       const gitApi = await this.getGitApi();
       
+      // Validate that the repository ID matches the pull request
+      await validatePullRequestRepository(
+        gitApi,
+        params.repositoryId,
+        params.pullRequestId,
+        this.config.project
+      );
+      
       const vote = {
         vote: 10
       };
@@ -443,6 +506,14 @@ export class GitService extends AzureDevOpsService {
   public async mergePullRequest(params: MergePullRequestParams): Promise<any> {
     try {
       const gitApi = await this.getGitApi();
+      
+      // Validate that the repository ID matches the pull request
+      await validatePullRequestRepository(
+        gitApi,
+        params.repositoryId,
+        params.pullRequestId,
+        this.config.project
+      );
       
       // Convert string merge strategy to number
       let mergeStrategy = 1; // Default to noFastForward
@@ -470,11 +541,92 @@ export class GitService extends AzureDevOpsService {
   }
 
   /**
+   * Add a comment to a pull request
+   */
+  public async addPullRequestComment(params: AddPullRequestCommentParams): Promise<any> {
+    try {
+      const gitApi = await this.getGitApi();
+      
+      // Validate that the repository ID matches the pull request
+      await validatePullRequestRepository(
+        gitApi,
+        params.repositoryId,
+        params.pullRequestId,
+        this.config.project
+      );
+      
+      if (params.threadId) {
+        // Add comment to existing thread
+        const comment = {
+          content: params.content,
+          parentCommentId: params.parentCommentId || 0,
+          commentType: 1 // 1 = text comment
+        };
+        
+        const result = await gitApi.createComment(
+          comment,
+          params.repositoryId,
+          params.pullRequestId,
+          params.threadId,
+          this.config.project
+        );
+        
+        return result;
+      } else {
+        // Create new thread with comment
+        const thread: any = {
+          comments: [{
+            parentCommentId: 0,
+            content: params.content,
+            commentType: 1 // 1 = text comment
+          }],
+          status: 1 // 1 = active
+        };
+        
+        // Add thread context if file/line information is provided
+        if (params.threadContext || (params.filePath && params.lineNumber)) {
+          thread.threadContext = params.threadContext || {
+            filePath: params.filePath,
+            rightFileStart: {
+              line: params.lineNumber,
+              offset: 1
+            },
+            rightFileEnd: {
+              line: params.lineNumber,
+              offset: 999
+            }
+          };
+        }
+        
+        const result = await gitApi.createThread(
+          thread,
+          params.repositoryId,
+          params.pullRequestId,
+          this.config.project
+        );
+        
+        return result;
+      }
+    } catch (error) {
+      console.error(`Error adding comment to pull request ${params.pullRequestId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Complete pull request
    */
   public async completePullRequest(params: CompletePullRequestParams): Promise<any> {
     try {
       const gitApi = await this.getGitApi();
+      
+      // Validate that the repository ID matches the pull request
+      await validatePullRequestRepository(
+        gitApi,
+        params.repositoryId,
+        params.pullRequestId,
+        this.config.project
+      );
       
       // Get the current pull request
       const pullRequest = await gitApi.getPullRequestById(params.pullRequestId);
